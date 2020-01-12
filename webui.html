@@ -1,0 +1,95 @@
+<html>
+	<head>
+		<title>Voice Over HTTP</title>
+	</head>
+	<body onload="webaudio_init()">
+		<h1>Voice Over HTTP</h1>
+		<script type="text/javascript">
+			var http_delivered = true; //Assume that the initial HTTP POST worked
+			var audio_tx_buffer = new Float32Array(65536);
+			var audio_tx_buffer_ptr = 0;
+			
+			function reset_http_delivered() {
+				http_delivered = true;
+			}
+			
+			function setup_signal_graph(media_stream) {
+				var source = audio_context.createMediaStreamSource(media_stream);
+				
+				var node = audio_context.createScriptProcessor(4096, 1, 1);
+				node.onaudioprocess = function(data) {
+					var input_buffer = data.inputBuffer;
+					var output_buffer = data.outputBuffer;
+					
+					var input_data = input_buffer.getChannelData(0);
+					var output_data = output_buffer.getChannelData(0);
+					
+					//Accumulate 65536 (~1.5 seconds @ 44100Hz) samples before sending
+					for (var i = 0; i < 4096; i++) {
+						audio_tx_buffer[i + audio_tx_buffer_ptr] = input_data[i];
+					}
+					audio_tx_buffer_ptr += 4096;
+					
+					//Have we accumulated enough?
+					if (audio_tx_buffer_ptr == 65536) {
+						audio_tx_buffer_ptr = 0;
+						//Transmit this audio packet over HTTP
+						if (http_delivered) {
+							http_delivered = false;
+							http_req = new XMLHttpRequest();
+							http_req.open("POST", "/tx" + call_side);
+							http_req.onload = reset_http_delivered;
+							http_req.send(audio_tx_buffer);
+						}
+					}
+					
+					for (var i = 0; i < input_data.length; i++) {
+						//output_data[i] = input_data[i]; //Un-comment to enable loopback
+						output_data[i] = 0.00; //Comment out to enable loopback
+					}
+				};
+				
+				source.connect(node);
+				node.connect(audio_context.destination);
+			}
+			
+			function handle_sample_block(evt) {
+				var audio_buf = audio_context.createBuffer(1, 65536, audio_context.sampleRate);
+				var now_buf = audio_buf.getChannelData(0);
+				var float_buf = new Float32Array(evt.target.response, 0, 65536);
+				for (var i = 0; i < float_buf.length; i++) {
+					now_buf[i] = float_buf[i];
+				}
+				
+				var source = audio_context.createBufferSource();
+				
+				source.buffer = audio_buf;
+				source.connect(audio_context.destination);
+				source.start();
+				
+				//Schedule the reception of the next audio block
+				get_sample_block();
+			}
+			function get_sample_block() {
+				var http_req = new XMLHttpRequest();
+				http_req.open("GET", "/rx" + call_side);
+				http_req.onload = handle_sample_block;
+				http_req.responseType = "arraybuffer";
+				http_req.send();
+			}
+			
+			function webaudio_init() {
+				call_side = "";
+				if (window.location.pathname == "/a/" || window.location.pathname == "/a") {
+					call_side = "a";
+				}
+				else if (window.location.pathname == "/b/" || window.location.pathname == "/b") {
+					call_side = "b";
+				}
+				audio_context = new window.AudioContext();
+				get_sample_block();
+				navigator.mediaDevices.getUserMedia({audio: true, video: false}).then(setup_signal_graph);
+			}
+		</script>
+	</body>
+</html>
