@@ -8,6 +8,7 @@
 			var http_delivered = true; //Assume that the initial HTTP POST worked
 			var audio_tx_buffer = new Float32Array(65536);
 			var audio_tx_buffer_ptr = 0;
+			var audio_tx_subsample = new Int16Array(13107); // 20% of samples of audio_tx_buffer, 50% bit depth
 			
 			function reset_http_delivered() {
 				http_delivered = true;
@@ -39,7 +40,12 @@
 							http_req = new XMLHttpRequest();
 							http_req.open("POST", "/tx" + call_side);
 							http_req.onload = reset_http_delivered;
-							http_req.send(audio_tx_buffer);
+							
+							//Subsample, lower bit depth 32bit to 16bit
+							for (var sub_index = 0; sub_index < 13107; sub_index++) {
+								audio_tx_subsample[sub_index] = Math.floor(audio_tx_buffer[5*sub_index] * 32767);
+							}
+							http_req.send(audio_tx_subsample);
 						}
 					}
 					
@@ -49,22 +55,39 @@
 					}
 				};
 				
-				source.connect(node);
+				//Setup LPF @ 4kHz
+				var lpf_input = audio_context.createBiquadFilter();
+				lpf_input.type = "lowpass";
+				lpf_input.frequency.value = 4000;
+				
+				source.connect(lpf_input);
+				lpf_input.connect(node);
 				node.connect(audio_context.destination);
 			}
 			
 			function handle_sample_block(evt) {
 				var audio_buf = audio_context.createBuffer(1, 65536, audio_context.sampleRate);
 				var now_buf = audio_buf.getChannelData(0);
-				var float_buf = new Float32Array(evt.target.response, 0, 65536);
-				for (var i = 0; i < float_buf.length; i++) {
-					now_buf[i] = float_buf[i];
+				var int_buf = new Int16Array(evt.target.response, 0, 13107);
+				
+				//Upsample, raise bit depth
+				for (var i = 0; i < int_buf.length; i++) {
+					now_buf[5*i] = int_buf[i] / 32767;
+					now_buf[(5*i) + 1] = int_buf[i] / 32767;
+					now_buf[(5*i) + 2] = int_buf[i] / 32767;
+					now_buf[(5*i) + 3] = int_buf[i] / 32767;
+					now_buf[(5*i) + 4] = int_buf[i] / 32767;
 				}
 				
-				var source = audio_context.createBufferSource();
+				//Setup LPF & 4kHz
+				var lpf_output = audio_context.createBiquadFilter();
+				lpf_output.type = "lowpass";
+				lpf_output.frequency.value = 4000;
 				
+				var source = audio_context.createBufferSource();
 				source.buffer = audio_buf;
-				source.connect(audio_context.destination);
+				source.connect(lpf_output);
+				lpf_output.connect(audio_context.destination);
 				source.start();
 				
 				//Schedule the reception of the next audio block
