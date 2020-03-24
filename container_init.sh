@@ -39,10 +39,10 @@ echo "...Done."
 echo ""
 echo ""
 
-echo "Starting Python relay servers..."
+echo "Starting NodeJS relay servers..."
 cd /relayserver
-(python python_relay.py 8000 2>/dev/null >/dev/null) &
-(python python_relay.py 8001 2>/dev/null >/dev/null) &
+(nodejs nodejs_relay.js 4 127.0.0.1 8000 2>/dev/null >/dev/null) &
+(nodejs nodejs_relay.js 4 127.0.0.1 8001 2>/dev/null >/dev/null) &
 
 echo "...relay servers started. Press CTRL+C to exit."
 read -r -d '' _ </dev/tty
